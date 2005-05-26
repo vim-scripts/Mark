@@ -1,5 +1,5 @@
 " Script Name: mark.vim
-" Version:     1.1.2
+" Version:     1.1.4
 " Last Change: March 23, 2005
 " Author:      Yuheng Xie <elephant@linux.net.cn>
 "
@@ -43,20 +43,41 @@ hi MarkWord6  ctermbg=Blue     ctermfg=Black  guibg=#9999FF    guifg=Black
 " you may map keys to call Mark() in your vimrc file to trigger the functions.
 " examples:
 " mark or unmark the word under or before the cursor
-nmap \m :let w=PrevWord()<bar>if w!=""<bar>cal Mark("\\<".w."\\>")<bar>en<cr>
+nmap <silent> \m :let w=PrevWord()<bar>
+	\if w!=""<bar>
+		\cal Mark("\\<".w."\\>")<bar>
+	\en<cr>
 " manually input a regular expression
-nmap \r :cal inputsave()<bar>let r=input("@")<bar>cal inputrestore()<bar>if r!=""<bar>cal Mark(r)<bar>en<cr>
+nmap <silent> \r :cal inputsave()<bar>
+	\let r=input("@")<bar>
+	\cal inputrestore()<bar>
+	\if r!=""<bar>
+		\cal Mark(r)<bar>
+	\en<cr>
 " clear the mark under the cursor, or clear all marks
-nmap \n :cal Mark(ThisMark())<cr>
+nmap <silent> \n :cal Mark(ThisMark())<cr>
 " jump to the next occurrence of this mark
-nnoremap * :let w=ThisMark()<bar>if w!=""<bar>cal search(w)<bar>el<bar>exe "norm! *"<bar>en<cr>
+nnoremap <silent> * :let w=ThisMark()<bar>
+	\if w!=""<bar>
+		\cal search(w)<bar>
+	\el<bar>
+		\exe "norm! *"<bar>
+	\en<cr>
 " jump to the previous occurrence of this mark
-nnoremap # :let w=ThisMark()<bar>if w!=""<bar>cal search(w,"b")<bar>el<bar>exe "norm! #"<bar>en<cr>
+nnoremap <silent> # :let w=ThisMark()<bar>
+	\if w!=""<bar>
+		\cal search(w,"b")<bar>
+	\el<bar>
+		\exe "norm! #"<bar>
+	\en<cr>
 " mark or unmark a visual selection
-vnoremap \m "my:cal Mark("\\V".substitute(@m,"\\n","\\\\n","g"))<cr>
+vnoremap <silent> \m "my:cal Mark("\\V".substitute(@m,"\\n","\\\\n","g"))<cr>
 
 " define variables if they don't exist
 function! InitMarkVaribles()
+	if !exists("g:mwHistAdd")
+		let g:mwHistAdd = "/@"
+	endif
 	if !exists("g:mwCycleMax")
 		let i = 1
 		while hlexists("MarkWord" . i)
@@ -105,7 +126,7 @@ function! Mark(...) " Mark(regexp)
 			endif
 			let i = i + 1
 		endwhile
-		return
+		return 0
 	endif
 
 	" clear the mark if it has been marked
@@ -114,14 +135,18 @@ function! Mark(...) " Mark(regexp)
 		if regexp == b:mwWord{i}
 			let b:mwWord{i} = ""
 			exe "syntax clear MarkWord" . i
-			return
+			return 0
 		endif
 		let i = i + 1
 	endwhile
 
 	" add to history
-	call histadd("/", regexp)
-	call histadd("@", regexp)
+	if stridx(g:mwHistAdd, "/") >= 0
+		call histadd("/", regexp)
+	endif
+	if stridx(g:mwHistAdd, "@") >= 0
+		call histadd("@", regexp)
+	endif
 
 	" quote regexp with / etc. e.g. pattern => /pattern/
 	let quote = "/?~!@#$%^&*+-=,.:"
@@ -134,7 +159,7 @@ function! Mark(...) " Mark(regexp)
 		let i = i + 1
 	endwhile
 	if i >= strlen(quote)
-		return
+		return -1
 	endif
 
 	" choose an unused mark group
@@ -149,7 +174,7 @@ function! Mark(...) " Mark(regexp)
 			endif
 			exe "syntax clear MarkWord" . i
 			exe "syntax match MarkWord" . i . " " . quoted_regexp . " containedin=ALL"
-			return
+			return i
 		endif
 		let i = i + 1
 	endwhile
@@ -166,7 +191,7 @@ function! Mark(...) " Mark(regexp)
 			endif
 			exe "syntax clear MarkWord" . i
 			exe "syntax match MarkWord" . i . " " . quoted_regexp . " containedin=ALL"
-			return
+			return i
 		endif
 		let i = i + 1
 	endwhile
