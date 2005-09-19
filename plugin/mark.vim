@@ -1,26 +1,28 @@
 " Script Name: mark.vim
-" Version:     1.1.4
-" Last Change: March 23, 2005
+" Version:     1.1.5
+" Last Change: September 20, 2005
 " Author:      Yuheng Xie <elephant@linux.net.cn>
+" Contributor: Luc Hermitte
 "
 " Description: a little script to highlight several words in different colors
 "              simultaneously
 "
-" Usage:       call Mark(regexp) to mark a regular expression.
-"              call Mark(regexp) with exactly the same regexp to unmark it.
-"              call Mark() to clear all marks.
+" Usage:       :Mark regexp   to mark a regular expression
+"              :Mark regexp   with exactly the same regexp to unmark it
+"              :Mark          to clear all marks
 "
 "              You may map keys for the call in your vimrc file for
 "              convenience. The default keys is:
 "              Highlighting:
 "                Normal \m  mark or unmark the word under or before the cursor
 "                       \r  manually input a regular expression
-"                       \n  clear this mark (i.e. the mark under the cursor),
+"                       \n  clear current mark (i.e. the mark under the cursor),
 "                           or clear all marks
 "                Visual \m  mark or unmark a visual selection
+"                       \r  manually input a regular expression
 "              Searching:
-"                Normal  *  jump to the next occurrence of this mark
-"                        #  jump to the previous occurrence of this mark
+"                Normal  *  jump to the next occurrence of current mark
+"                        #  jump to the previous occurrence of current mark
 "                combined with VIM's / and ? etc.
 "
 "              The default colors/groups setting is for marking six
@@ -30,6 +32,30 @@
 "              found below.
 "
 " Bugs:        some colored words could not be highlighted
+"
+" Changes:
+"
+" 20th Sep 2005, Yuheng Xie: minor modifications
+" (*) merged MarkRegexVisual into MarkRegex
+" (*) added GetVisualSelectionEscaped for multi-lines visual selection and
+"     visual selection contains ^, $, etc.
+" (*) changed the name ThisMark to CurrentMark
+" (*) added SearchCurrentMark and re-used raw map (instead of VIM function) to
+"     implement * and #
+"
+" 14th Sep 2005, Luc Hermitte: modifications done on v1.1.4
+" (*) anti-reinclusion guards. They do not guard colors definitions in case
+"     this script must be reloaded after .gvimrc
+" (*) Protection against disabled |line-continuation|s.
+" (*) Script-local functions
+" (*) Default keybindings
+" (*) \r for visual mode
+" (*) uses <leader> instead of "\"
+" (*) do not mess with global variable g:w
+" (*) regex simplified -> double quotes changed into simple quotes.
+" (*) strpart(str, idx, 1) -> str[idx]
+" (*) command :Mark
+"     -> e.g. :Mark Mark.\{-}\ze(
 
 " default colors/groups
 " you may define your own colors in you vimrc file, in the form as below:
@@ -40,41 +66,107 @@ hi MarkWord4  ctermbg=Red      ctermfg=Black  guibg=#FF7272    guifg=Black
 hi MarkWord5  ctermbg=Magenta  ctermfg=Black  guibg=#FFB3FF    guifg=Black
 hi MarkWord6  ctermbg=Blue     ctermfg=Black  guibg=#9999FF    guifg=Black
 
-" you may map keys to call Mark() in your vimrc file to trigger the functions.
-" examples:
-" mark or unmark the word under or before the cursor
-nmap <silent> \m :let w=PrevWord()<bar>
-	\if w!=""<bar>
-		\cal Mark("\\<".w."\\>")<bar>
-	\en<cr>
+" Anti reinclusion guards
+if exists('g:loaded_mark') && !exists('g:force_reload_mark')
+	finish
+endif
+
+" Support for |line-continuation|
+let s:save_cpo = &cpo
+set cpo&vim
+
+" Default bindings
+
+if !hasmapto('<Plug>MarkSet', 'n')
+	nmap <unique> <silent> <leader>m <Plug>MarkSet
+endif
+if !hasmapto('<Plug>MarkSet', 'v')
+	vmap <unique> <silent> <leader>m <Plug>MarkSet
+endif
+if !hasmapto('<Plug>MarkRegex', 'n')
+	nmap <unique> <silent> <leader>r <Plug>MarkRegex
+endif
+if !hasmapto('<Plug>MarkRegex', 'v')
+	vmap <unique> <silent> <leader>r <Plug>MarkRegex
+endif
+if !hasmapto('<Plug>MarkClear', 'n')
+	nmap <unique> <silent> <leader>n <Plug>MarkClear
+endif
+
+nnoremap <silent> <Plug>MarkSet   :call
+	\ <sid>MarkCurrentWord()<cr>
+vnoremap <silent> <Plug>MarkSet   <c-\><c-n>:call
+	\ <sid>DoMark(<sid>GetVisualSelectionEscaped("enV"))<cr>
+nnoremap <silent> <Plug>MarkRegex :call
+	\ <sid>MarkRegex()<cr>
+vnoremap <silent> <Plug>MarkRegex <c-\><c-n>:call
+	\ <sid>MarkRegex(<sid>GetVisualSelectionEscaped("N"))<cr>
+nnoremap <silent> <Plug>MarkClear :call
+	\ <sid>DoMark(<sid>CurrentMark())<cr>
+
+" jump to the next occurrence of current mark
+nnoremap <silent> * :if !<sid>SearchCurrentMark()<bar>execute "norm! *"<bar>endif<cr>
+" jump to the previous occurrence of current mark
+nnoremap <silent> # :if !<sid>SearchCurrentMark("b")<bar>execute "norm! #"<bar>endif<cr>
+
+command! -nargs=? Mark call s:DoMark(<f-args>)
+
+" Functions
+
+function! s:MarkCurrentWord()
+	let w = s:PrevWord()
+	if w != ""
+		call s:DoMark('\<' . w . '\>')
+	endif
+endfunction
+
+function! s:GetVisualSelection()
+	let save_a = @a
+	silent normal! gv"ay
+	let res = @a
+	let @a = save_a
+	return res
+endfunction
+
+function! s:GetVisualSelectionEscaped(flags)
+	" flags:
+	"  "e" \  -> \\  
+	"  "n" \n -> \\n  for multi-lines visual selection
+	"  "N" \n removed
+	"  "V" \V added   for marking plain ^, $, etc.
+	let result = s:GetVisualSelection()
+	let i = 0
+	while i < strlen(a:flags)
+		if a:flags[i] ==# "e"
+			let result = escape(result, '\')
+		elseif a:flags[i] ==# "n"
+			let result = substitute(result, '\n', '\\n', 'g')
+		elseif a:flags[i] ==# "N"
+			let result = substitute(result, '\n', '', 'g')
+		elseif a:flags[i] ==# "V"
+			let result = '\V' . result
+		endif
+		let i = i + 1
+	endwhile
+	return result
+endfunction
+
 " manually input a regular expression
-nmap <silent> \r :cal inputsave()<bar>
-	\let r=input("@")<bar>
-	\cal inputrestore()<bar>
-	\if r!=""<bar>
-		\cal Mark(r)<bar>
-	\en<cr>
-" clear the mark under the cursor, or clear all marks
-nmap <silent> \n :cal Mark(ThisMark())<cr>
-" jump to the next occurrence of this mark
-nnoremap <silent> * :let w=ThisMark()<bar>
-	\if w!=""<bar>
-		\cal search(w)<bar>
-	\el<bar>
-		\exe "norm! *"<bar>
-	\en<cr>
-" jump to the previous occurrence of this mark
-nnoremap <silent> # :let w=ThisMark()<bar>
-	\if w!=""<bar>
-		\cal search(w,"b")<bar>
-	\el<bar>
-		\exe "norm! #"<bar>
-	\en<cr>
-" mark or unmark a visual selection
-vnoremap <silent> \m "my:cal Mark("\\V".substitute(@m,"\\n","\\\\n","g"))<cr>
+function! s:MarkRegex(...) " MarkRegex(regexp)
+	let regexp = ""
+	if a:0 > 0
+		let regexp = a:1
+	endif
+	call inputsave()
+	let r = input("@", regexp)
+	call inputrestore()
+	if r != ""
+		call s:DoMark(r)
+	endif
+endfunction
 
 " define variables if they don't exist
-function! InitMarkVaribles()
+function! s:InitMarkVariables()
 	if !exists("g:mwHistAdd")
 		let g:mwHistAdd = "/@"
 	endif
@@ -98,19 +190,19 @@ function! InitMarkVaribles()
 endfunction
 
 " return the word under or before the cursor
-function! PrevWord()
+function! s:PrevWord()
 	let line = getline(".")
-	if line[col(".") - 1] =~ "\\w"
+	if line[col(".") - 1] =~ '\w'
 		return expand("<cword>")
 	else
-		return substitute(strpart(line, 0, col(".") - 1), "^.\\{-}\\(\\w\\+\\)\\W*$", "\\1", "")
+		return substitute(strpart(line, 0, col(".") - 1), '^.\{-}\(\w\+\)\W*$', '\1', '')
 	endif
 endfunction
 
 " mark or unmark a regular expression
-function! Mark(...) " Mark(regexp)
+function! s:DoMark(...) " DoMark(regexp)
 	" define variables if they don't exist
-	call InitMarkVaribles()
+	call s:InitMarkVariables()
 
 	" clear all marks if regexp is null
 	let regexp = ""
@@ -152,8 +244,8 @@ function! Mark(...) " Mark(regexp)
 	let quote = "/?~!@#$%^&*+-=,.:"
 	let i = 0
 	while i < strlen(quote)
-		if stridx(regexp, strpart(quote, i, 1)) < 0
-			let quoted_regexp = strpart(quote, i, 1) . regexp . strpart(quote, i, 1)
+		if stridx(regexp, quote[i]) < 0
+			let quoted_regexp = quote[i] . regexp . quote[i]
 			break
 		endif
 		let i = i + 1
@@ -198,9 +290,9 @@ function! Mark(...) " Mark(regexp)
 endfunction
 
 " return the mark string under the cursor. multi-lines marks not supported
-function! ThisMark()
+function! s:CurrentMark()
 	" define variables if they don't exist
-	call InitMarkVaribles()
+	call s:InitMarkVariables()
 
 	let line = getline(".")
 	let i = 1
@@ -211,6 +303,7 @@ function! ThisMark()
 				let b = match(line, b:mwWord{i}, start)
 				let e = matchend(line, b:mwWord{i}, start)
 				if b < col(".") && col(".") <= e
+					let s:current_mark_position = line . "_" . b
 					return b:mwWord{i}
 				endif
 				let start = e
@@ -220,5 +313,27 @@ function! ThisMark()
 	endwhile
 	return ""
 endfunction
+
+" search current mark
+function! s:SearchCurrentMark(...) " SearchCurrentMark(flags)
+	let flags = ""
+	if a:0 > 0
+		let flags = a:1
+	endif
+	let w = s:CurrentMark()
+	if w != ""
+		let p = s:current_mark_position
+		while p == s:current_mark_position
+			call search(w, flags)
+			call s:CurrentMark()
+		endwhile
+		return 1
+	else
+		return 0
+	endif
+endfunction
+
+" Restore previous 'cpo' value
+let &cpo = s:save_cpo
 
 " vim: ts=2 sw=2
