@@ -1,6 +1,6 @@
 " Script Name: mark.vim
-" Version:     1.1.5
-" Last Change: September 20, 2005
+" Version:     1.1.7
+" Last Change: September 30, 2005
 " Author:      Yuheng Xie <elephant@linux.net.cn>
 " Contributor: Luc Hermitte
 "
@@ -303,7 +303,7 @@ function! s:CurrentMark()
 				let b = match(line, b:mwWord{i}, start)
 				let e = matchend(line, b:mwWord{i}, start)
 				if b < col(".") && col(".") <= e
-					let s:current_mark_position = line . "_" . b
+					let s:current_mark_position = line(".") . "_" . b
 					return b:mwWord{i}
 				endif
 				let start = e
@@ -323,10 +323,11 @@ function! s:SearchCurrentMark(...) " SearchCurrentMark(flags)
 	let w = s:CurrentMark()
 	if w != ""
 		let p = s:current_mark_position
-		while p == s:current_mark_position
+		call search(w, flags)
+		call s:CurrentMark()
+		if p == s:current_mark_position
 			call search(w, flags)
-			call s:CurrentMark()
-		endwhile
+		endif
 		return 1
 	else
 		return 0
