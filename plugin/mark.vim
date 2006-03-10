@@ -1,6 +1,6 @@
 " Script Name: mark.vim
-" Version:     1.1.7
-" Last Change: September 30, 2005
+" Version:     1.1.8
+" Last Change: March 10, 2006
 " Author:      Yuheng Xie <elephant@linux.net.cn>
 " Contributor: Luc Hermitte
 "
@@ -21,8 +21,12 @@
 "                Visual \m  mark or unmark a visual selection
 "                       \r  manually input a regular expression
 "              Searching:
-"                Normal  *  jump to the next occurrence of current mark
-"                        #  jump to the previous occurrence of current mark
+"                Normal \*  jump to the next occurrence of current mark
+"                       \#  jump to the previous occurrence of current mark
+"                       \/  jump to the next occurrence of ANY mark
+"                       \?  jump to the previous occurrence of ANY mark
+"                        *  behaviors vary, please refer to the table on
+"                        #  line 123
 "                combined with VIM's / and ? etc.
 "
 "              The default colors/groups setting is for marking six
@@ -34,6 +38,10 @@
 " Bugs:        some colored words could not be highlighted
 "
 " Changes:
+"
+" 10th Mar 2006, Yuheng Xie: jump to ANY mark
+" (*) added \* \# \/ \? for the ability of jumping to ANY mark, even when the
+"     cursor is not currently over any mark
 "
 " 20th Sep 2005, Yuheng Xie: minor modifications
 " (*) merged MarkRegexVisual into MarkRegex
@@ -104,10 +112,33 @@ vnoremap <silent> <Plug>MarkRegex <c-\><c-n>:call
 nnoremap <silent> <Plug>MarkClear :call
 	\ <sid>DoMark(<sid>CurrentMark())<cr>
 
-" jump to the next occurrence of current mark
-nnoremap <silent> * :if !<sid>SearchCurrentMark()<bar>execute "norm! *"<bar>endif<cr>
-" jump to the previous occurrence of current mark
-nnoremap <silent> # :if !<sid>SearchCurrentMark("b")<bar>execute "norm! #"<bar>endif<cr>
+" Here is a sumerization of the following keys' behaviors:
+" 
+" First of all, \#, \? and # behave just like \*, \/ and *, respectively,
+" except that \#, \? and # search backward.
+"
+" \*, \/ and *'s behaviors differ base on whether the cursor is currently
+" placed over an active mark:
+"
+"       Cursor over mark                  Cursor not over mark
+" ---------------------------------------------------------------------------
+"  \*   jump to the next occurrence of    jump to the next occurrence of
+"       current mark, and remember it     "last mark".
+"       as "last mark".
+"
+"  \/   jump to the next occurrence of    same as left
+"       ANY mark.
+"
+"   *   if \* is the most recently used,  do VIM's original *
+"       do a \*; otherwise (\/ is the
+"       most recently used), do a \/.
+
+nnoremap <silent> <leader>* :call <sid>SearchCurrentMark()<cr>
+nnoremap <silent> <leader># :call <sid>SearchCurrentMark("b")<cr>
+nnoremap <silent> <leader>/ :call <sid>SearchAnyMark()<cr>
+nnoremap <silent> <leader>? :call <sid>SearchAnyMark("b")<cr>
+nnoremap <silent> * :if !<sid>SearchNext()<bar>execute "norm! *"<bar>endif<cr>
+nnoremap <silent> # :if !<sid>SearchNext("b")<bar>execute "norm! #"<bar>endif<cr>
 
 command! -nargs=? Mark call s:DoMark(<f-args>)
 
@@ -187,6 +218,9 @@ function! s:InitMarkVariables()
 		endif
 		let i = i + 1
 	endwhile
+	if !exists("b:mwLastSearched")
+		let b:mwLastSearched = ""
+	endif
 endfunction
 
 " return the word under or before the cursor
@@ -218,6 +252,7 @@ function! s:DoMark(...) " DoMark(regexp)
 			endif
 			let i = i + 1
 		endwhile
+		let b:mwLastSearched = ""
 		return 0
 	endif
 
@@ -225,6 +260,9 @@ function! s:DoMark(...) " DoMark(regexp)
 	let i = 1
 	while i <= g:mwCycleMax
 		if regexp == b:mwWord{i}
+			if b:mwLastSearched == b:mwWord{i}
+				let b:mwLastSearched = ""
+			endif
 			let b:mwWord{i} = ""
 			exe "syntax clear MarkWord" . i
 			return 0
@@ -275,6 +313,9 @@ function! s:DoMark(...) " DoMark(regexp)
 	let i = 1
 	while i <= g:mwCycleMax
 		if b:mwCycle == i
+			if b:mwLastSearched == b:mwWord{i}
+				let b:mwLastSearched = ""
+			endif
 			let b:mwWord{i} = regexp
 			if i < g:mwCycleMax
 				let b:mwCycle = i + 1
@@ -327,6 +368,71 @@ function! s:SearchCurrentMark(...) " SearchCurrentMark(flags)
 		call s:CurrentMark()
 		if p == s:current_mark_position
 			call search(w, flags)
+		endif
+		let b:mwLastSearched = w
+	else
+		if b:mwLastSearched != ""
+			call search(b:mwLastSearched, flags)
+		else
+			call s:SearchAnyMark(flags)
+			let b:mwLastSearched = s:CurrentMark()
+		endif
+	endif
+endfunction
+
+" combine all marks into one regexp
+function! s:AnyMark()
+	" define variables if they don't exist
+	call s:InitMarkVariables()
+
+	let w = ""
+	let i = 1
+	while i <= g:mwCycleMax
+		if b:mwWord{i} != ""
+			if w != ""
+				let w = w . '\|' . b:mwWord{i}
+			else
+				let w = b:mwWord{i}
+			endif
+		endif
+		let i = i + 1
+	endwhile
+	return w
+endfunction
+
+" search any mark
+function! s:SearchAnyMark(...) " SearchAnyMark(flags)
+	let flags = ""
+	if a:0 > 0
+		let flags = a:1
+	endif
+	let w = s:CurrentMark()
+	if w != ""
+		let p = s:current_mark_position
+	else
+		let p = ""
+	endif
+	let w = s:AnyMark()
+	call search(w, flags)
+	call s:CurrentMark()
+	if p == s:current_mark_position
+		call search(w, flags)
+	endif
+	let b:mwLastSearched = ""
+endfunction
+
+" search last searched mark
+function! s:SearchNext(...) " SearchNext(flags)
+	let flags = ""
+	if a:0 > 0
+		let flags = a:1
+	endif
+	let w = s:CurrentMark()
+	if w != ""
+		if b:mwLastSearched != ""
+			call s:SearchCurrentMark(flags)
+		else
+			call s:SearchAnyMark(flags)
 		endif
 		return 1
 	else
