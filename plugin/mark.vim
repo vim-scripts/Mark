@@ -1,6 +1,6 @@
 " Script Name: mark.vim
-" Version:     1.1.8
-" Last Change: March 10, 2006
+" Version:     1.1.8 (global version)
+" Last Change: April 25, 2008
 " Author:      Yuheng Xie <elephant@linux.net.cn>
 " Contributor: Luc Hermitte
 "
@@ -142,6 +142,8 @@ nnoremap <silent> # :if !<sid>SearchNext("b")<bar>execute "norm! #"<bar>endif<cr
 
 command! -nargs=? Mark call s:DoMark(<f-args>)
 
+autocmd! BufWinEnter * call s:UpdateMark()
+
 " Functions
 
 function! s:MarkCurrentWord()
@@ -208,18 +210,18 @@ function! s:InitMarkVariables()
 		endwhile
 		let g:mwCycleMax = i - 1
 	endif
-	if !exists("b:mwCycle")
-		let b:mwCycle = 1
+	if !exists("g:mwCycle")
+		let g:mwCycle = 1
 	endif
 	let i = 1
 	while i <= g:mwCycleMax
-		if !exists("b:mwWord" . i)
-			let b:mwWord{i} = ""
+		if !exists("g:mwWord" . i)
+			let g:mwWord{i} = ""
 		endif
 		let i = i + 1
 	endwhile
-	if !exists("b:mwLastSearched")
-		let b:mwLastSearched = ""
+	if !exists("g:mwLastSearched")
+		let g:mwLastSearched = ""
 	endif
 endfunction
 
@@ -246,25 +248,29 @@ function! s:DoMark(...) " DoMark(regexp)
 	if regexp == ""
 		let i = 1
 		while i <= g:mwCycleMax
-			if b:mwWord{i} != ""
-				let b:mwWord{i} = ""
-				exe "syntax clear MarkWord" . i
+			if g:mwWord{i} != ""
+				let g:mwWord{i} = ""
+				let lastwinnr = winnr()
+				exe "windo syntax clear MarkWord" . i
+				exe lastwinnr . "wincmd w"
 			endif
 			let i = i + 1
 		endwhile
-		let b:mwLastSearched = ""
+		let g:mwLastSearched = ""
 		return 0
 	endif
 
 	" clear the mark if it has been marked
 	let i = 1
 	while i <= g:mwCycleMax
-		if regexp == b:mwWord{i}
-			if b:mwLastSearched == b:mwWord{i}
-				let b:mwLastSearched = ""
+		if regexp == g:mwWord{i}
+			if g:mwLastSearched == g:mwWord{i}
+				let g:mwLastSearched = ""
 			endif
-			let b:mwWord{i} = ""
-			exe "syntax clear MarkWord" . i
+			let g:mwWord{i} = ""
+			let lastwinnr = winnr()
+			exe "windo syntax clear MarkWord" . i
+			exe lastwinnr . "wincmd w"
 			return 0
 		endif
 		let i = i + 1
@@ -295,15 +301,19 @@ function! s:DoMark(...) " DoMark(regexp)
 	" choose an unused mark group
 	let i = 1
 	while i <= g:mwCycleMax
-		if b:mwWord{i} == ""
-			let b:mwWord{i} = regexp
+		if g:mwWord{i} == ""
+			let g:mwWord{i} = regexp
 			if i < g:mwCycleMax
-				let b:mwCycle = i + 1
+				let g:mwCycle = i + 1
 			else
-				let b:mwCycle = 1
+				let g:mwCycle = 1
 			endif
-			exe "syntax clear MarkWord" . i
-			exe "syntax match MarkWord" . i . " " . quoted_regexp . " containedin=ALL"
+			let lastwinnr = winnr()
+			exe "windo syntax clear MarkWord" . i
+			" suggested by Marc Weber
+			" exe "windo syntax match MarkWord" . i . " " . quoted_regexp . " containedin=ALL"
+			exe "windo syntax match MarkWord" . i . " " . quoted_regexp . " containedin=.*"
+			exe lastwinnr . "wincmd w"
 			return i
 		endif
 		let i = i + 1
@@ -312,19 +322,54 @@ function! s:DoMark(...) " DoMark(regexp)
 	" choose a mark group by cycle
 	let i = 1
 	while i <= g:mwCycleMax
-		if b:mwCycle == i
-			if b:mwLastSearched == b:mwWord{i}
-				let b:mwLastSearched = ""
+		if g:mwCycle == i
+			if g:mwLastSearched == g:mwWord{i}
+				let g:mwLastSearched = ""
 			endif
-			let b:mwWord{i} = regexp
+			let g:mwWord{i} = regexp
 			if i < g:mwCycleMax
-				let b:mwCycle = i + 1
+				let g:mwCycle = i + 1
 			else
-				let b:mwCycle = 1
+				let g:mwCycle = 1
 			endif
-			exe "syntax clear MarkWord" . i
-			exe "syntax match MarkWord" . i . " " . quoted_regexp . " containedin=ALL"
+			let lastwinnr = winnr()
+			exe "windo syntax clear MarkWord" . i
+			" suggested by Marc Weber
+			" exe "windo syntax match MarkWord" . i . " " . quoted_regexp . " containedin=ALL"
+			exe "windo syntax match MarkWord" . i . " " . quoted_regexp . " containedin=.*"
+			exe lastwinnr . "wincmd w"
 			return i
+		endif
+		let i = i + 1
+	endwhile
+endfunction
+
+" update mark colors
+function! s:UpdateMark()
+	" define variables if they don't exist
+	call s:InitMarkVariables()
+
+	let i = 1
+	while i <= g:mwCycleMax
+		exe "syntax clear MarkWord" . i
+		if g:mwWord{i} != ""
+			" quote regexp with / etc. e.g. pattern => /pattern/
+			let quote = "/?~!@#$%^&*+-=,.:"
+			let j = 0
+			while j < strlen(quote)
+				if stridx(g:mwWord{i}, quote[j]) < 0
+					let quoted_regexp = quote[j] . g:mwWord{i} . quote[j]
+					break
+				endif
+				let j = j + 1
+			endwhile
+			if j >= strlen(quote)
+				continue
+			endif
+
+			" suggested by Marc Weber
+			" exe "syntax match MarkWord" . i . " " . quoted_regexp . " containedin=ALL"
+			exe "syntax match MarkWord" . i . " " . quoted_regexp . " containedin=.*"
 		endif
 		let i = i + 1
 	endwhile
@@ -338,14 +383,14 @@ function! s:CurrentMark()
 	let line = getline(".")
 	let i = 1
 	while i <= g:mwCycleMax
-		if b:mwWord{i} != ""
+		if g:mwWord{i} != ""
 			let start = 0
 			while start >= 0 && start < strlen(line) && start < col(".")
-				let b = match(line, b:mwWord{i}, start)
-				let e = matchend(line, b:mwWord{i}, start)
+				let b = match(line, g:mwWord{i}, start)
+				let e = matchend(line, g:mwWord{i}, start)
 				if b < col(".") && col(".") <= e
 					let s:current_mark_position = line(".") . "_" . b
-					return b:mwWord{i}
+					return g:mwWord{i}
 				endif
 				let start = e
 			endwhile
@@ -369,13 +414,13 @@ function! s:SearchCurrentMark(...) " SearchCurrentMark(flags)
 		if p == s:current_mark_position
 			call search(w, flags)
 		endif
-		let b:mwLastSearched = w
+		let g:mwLastSearched = w
 	else
-		if b:mwLastSearched != ""
-			call search(b:mwLastSearched, flags)
+		if g:mwLastSearched != ""
+			call search(g:mwLastSearched, flags)
 		else
 			call s:SearchAnyMark(flags)
-			let b:mwLastSearched = s:CurrentMark()
+			let g:mwLastSearched = s:CurrentMark()
 		endif
 	endif
 endfunction
@@ -388,11 +433,11 @@ function! s:AnyMark()
 	let w = ""
 	let i = 1
 	while i <= g:mwCycleMax
-		if b:mwWord{i} != ""
+		if g:mwWord{i} != ""
 			if w != ""
-				let w = w . '\|' . b:mwWord{i}
+				let w = w . '\|' . g:mwWord{i}
 			else
-				let w = b:mwWord{i}
+				let w = g:mwWord{i}
 			endif
 		endif
 		let i = i + 1
@@ -418,7 +463,7 @@ function! s:SearchAnyMark(...) " SearchAnyMark(flags)
 	if p == s:current_mark_position
 		call search(w, flags)
 	endif
-	let b:mwLastSearched = ""
+	let g:mwLastSearched = ""
 endfunction
 
 " search last searched mark
@@ -429,7 +474,7 @@ function! s:SearchNext(...) " SearchNext(flags)
 	endif
 	let w = s:CurrentMark()
 	if w != ""
-		if b:mwLastSearched != ""
+		if g:mwLastSearched != ""
 			call s:SearchCurrentMark(flags)
 		else
 			call s:SearchAnyMark(flags)
